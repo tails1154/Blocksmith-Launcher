@@ -1,0 +1,19 @@
+pkgbase = blocksmith-launcher
+	pkgdesc = Minecraft Java launcher powered by PortableMC and Modrinth
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/tails1154/Blocksmith-Launcher
+	arch = x86_64
+	license = LicenseRef-Proprietary
+	makedepends = python
+	makedepends = python-platformdirs
+	makedepends = pyinstaller
+	depends = glibc
+	depends = tk
+	options = !debug
+	source = blocksmith-launcher-0.1.0.tar.gz::https://github.com/tails1154/Blocksmith-Launcher/archive/refs/tags/v0.1.0.tar.gz
+	source = portablemc-4.4.1.whl::https://files.pythonhosted.org/packages/68/92/3ffda059f75068caf1de17c78c29d3a0746835d598e82abf77180092d124/portablemc-4.4.1-py3-none-any.whl
+	sha256sums = c94f4e73c15d6740840bff13f82b7568513c0cfba0709fbc5bc7c0b34cc82fc1
+	sha256sums = 82435214f4745fb0b5a6dbbb065b1b22723f5805d2468a74c896b33733eb2de6
+
+pkgname = blocksmith-launcher

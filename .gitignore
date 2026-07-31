@@ -5,3 +5,8 @@ __pycache__/
 build/
 dist/
 *.log
+*.pkg.tar.*
+*.whl
+/blocksmith-launcher-*.tar.gz
+src/
+pkg/
