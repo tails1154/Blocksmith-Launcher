@@ -4,6 +4,7 @@ import queue
 import base64
 import re
 import shutil
+import sys
 import threading
 import tkinter as tk
 import webbrowser
@@ -88,6 +89,7 @@ class BlocksmithApp(tk.Tk):
         self.mod_detail_project = None
         self.updater = GitHubUpdater()
         self.available_update = None
+        self.updates_enabled = not sys.platform.startswith("linux")
         self.pending_protocol_uri = protocol_uri
         self.active_profile: Profile | None = None
         self.busy = False
@@ -100,8 +102,8 @@ class BlocksmithApp(tk.Tk):
             last_id = self.settings.get("last_profile_id")
             selected = next((profile for profile in self.profiles if profile.id == last_id), self.profiles[0])
             self.select_profile(selected)
-        if self.settings.get("check_updates", True):
-            self.after(1500, lambda: self.check_for_updates(silent=False))
+        if self.updates_enabled and self.settings.get("check_updates", True):
+            self.after(1500, lambda: self.check_for_updates(silent=True))
         if protocol_uri:
             self.after(700, lambda: self.handle_protocol_uri(protocol_uri))
 
@@ -395,13 +397,18 @@ class BlocksmithApp(tk.Tk):
         update_row.pack(fill="x", pady=(10, 8))
         ttk.Label(update_row, text="Channel", style="Dirt.TLabel", foreground=theme.MUTED).pack(side="left")
         self.update_channel = tk.StringVar(value=self.settings.get("update_channel", "Stable"))
-        channel_box = ttk.Combobox(update_row, textvariable=self.update_channel, values=("Stable", "Development"), state="readonly", width=16)
+        channel_box = ttk.Combobox(update_row, textvariable=self.update_channel, values=("Stable", "Development"), state="readonly" if self.updates_enabled else "disabled", width=16)
         channel_box.pack(side="left", padx=(10, 14))
         channel_box.bind("<<ComboboxSelected>>", lambda _event: self.save_update_channel())
-        ttk.Button(update_row, text="Check now", command=self.check_for_updates).pack(side="left")
+        self.update_check_button = ttk.Button(update_row, text="Check now", command=self.check_for_updates, state="normal" if self.updates_enabled else "disabled")
+        self.update_check_button.pack(side="left")
         self.update_button = ttk.Button(update_row, text="Download and restart", command=self.download_update, state="disabled")
         self.update_button.pack(side="right")
-        self.update_status = ttk.Label(update_card, text="Updates are checked automatically.", style="Dirt.TLabel", foreground=theme.MUTED)
+        update_status = (
+            "Linux updates are managed outside Blocksmith."
+            if not self.updates_enabled else "Updates are checked automatically."
+        )
+        self.update_status = ttk.Label(update_card, text=update_status, style="Dirt.TLabel", foreground=theme.MUTED)
         self.update_status.pack(anchor="w")
         self.update_progress = ttk.Progressbar(update_card, mode="determinate", maximum=100)
         self.update_progress.pack(fill="x", pady=(9, 0))
@@ -637,6 +644,8 @@ class BlocksmithApp(tk.Tk):
         self.update_status.config(text=f"Using the {self.update_channel.get()} update channel.")
 
     def check_for_updates(self, silent: bool = False) -> None:
+        if not self.updates_enabled:
+            return
         channel = self.update_channel.get()
         installed = self.settings.get("development_release_id") if channel == "Development" else None
         self.update_status.config(text=f"Checking {channel.lower()} releases…")
@@ -973,28 +982,23 @@ class BlocksmithApp(tk.Tk):
                     else:
                         self.update_status.config(text=f"{update.name} is available.")
                         self.update_button.config(state="normal")
-                        if not silent:
-                            if messagebox.askyesno(
-                                "Blocksmith update available",
-                                f"{update.name} is available.\n\n"
-                                "Download the verified update now?",
-                                icon="question",
-                            ):
-                                self.download_update()
+                        if messagebox.askyesno(
+                            "Blocksmith update available",
+                            f"{update.name} is available.\n\n"
+                            "Download the verified update now?",
+                            icon="question",
+                        ):
+                            self.download_update()
                 elif kind == "update_progress":
                     self.update_progress["value"] = float(value) * 100
                 elif kind == "update_ready":
                     update, executable = value
                     self.update_progress["value"] = 100
                     self.update_status.config(text="Verified. Ready to restart.")
-                    elevation_note = (
-                        "\n\nYour system will ask for administrator authentication through pkexec."
-                        if self.updater.requires_elevation() else ""
-                    )
                     if messagebox.askyesno(
                         "Install update?",
                         f"{update.name} was downloaded and its SHA-256 checksum passed.\n\n"
-                        "Restart Blocksmith and install it now?" + elevation_note,
+                        "Restart Blocksmith and install it now?",
                     ):
                         if update.channel == "Development":
                             self.settings["development_release_id"] = update.release_id

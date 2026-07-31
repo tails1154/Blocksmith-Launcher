@@ -2,7 +2,6 @@ import json
 import hashlib
 import io
 import os
-import shutil
 import sys
 import tarfile
 import zipfile
@@ -145,6 +144,7 @@ def test_modrinth_search_keeps_rich_project_metadata(monkeypatch):
 
 
 def test_updater_stable_version_and_development_asset_identity(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
     wanted = GitHubUpdater.platform_asset()
     release = {
         "id": 10,
@@ -167,6 +167,7 @@ def test_updater_stable_version_and_development_asset_identity(monkeypatch):
 
 
 def test_updater_accepts_packaged_checksum_filename(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
     wanted = GitHubUpdater.platform_asset()
     checksum_name = wanted.removesuffix(".tar.gz").removesuffix(".zip") + ".sha256"
     release = {
@@ -181,6 +182,7 @@ def test_updater_accepts_packaged_checksum_filename(monkeypatch):
 
 
 def test_updater_verifies_and_extracts_platform_archive(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
     updater = GitHubUpdater()
     wanted = updater.platform_asset()
     executable_name = "Blocksmith.exe" if sys.platform == "win32" else "Blocksmith"
@@ -211,25 +213,13 @@ def test_updater_verifies_and_extracts_platform_archive(tmp_path, monkeypatch):
     assert extracted.read_bytes() == payload
 
 
-def test_linux_system_install_can_update_with_pkexec(monkeypatch):
+def test_linux_self_updates_are_disabled(monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(sys, "executable", "/usr/bin/Blocksmith")
-    monkeypatch.setattr(os, "access", lambda _path, _mode: False)
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
-    assert GitHubUpdater.can_self_update()[0] is True
-    assert GitHubUpdater.requires_elevation() is True
-
-
-def test_linux_system_install_needs_pkexec(monkeypatch):
-    monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(sys, "executable", "/usr/bin/Blocksmith")
-    monkeypatch.setattr(os, "access", lambda _path, _mode: False)
-    monkeypatch.setattr(shutil, "which", lambda _name: None)
     allowed, reason = GitHubUpdater.can_self_update()
     assert allowed is False
-    assert "pkexec" in reason
+    assert "disabled on Linux" in reason
 
 
 def test_mod_install_protocol_round_trip():
