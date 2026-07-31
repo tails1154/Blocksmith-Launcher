@@ -981,10 +981,14 @@ class BlocksmithApp(tk.Tk):
                     update, executable = value
                     self.update_progress["value"] = 100
                     self.update_status.config(text="Verified. Ready to restart.")
+                    elevation_note = (
+                        "\n\nYour system will ask for administrator authentication through pkexec."
+                        if self.updater.requires_elevation() else ""
+                    )
                     if messagebox.askyesno(
                         "Install update?",
                         f"{update.name} was downloaded and its SHA-256 checksum passed.\n\n"
-                        "Restart Blocksmith and install it now?",
+                        "Restart Blocksmith and install it now?" + elevation_note,
                     ):
                         if update.channel == "Development":
                             self.settings["development_release_id"] = update.release_id

@@ -1,6 +1,8 @@
 import json
 import hashlib
 import io
+import os
+import shutil
 import sys
 import tarfile
 import zipfile
@@ -207,6 +209,27 @@ def test_updater_verifies_and_extracts_platform_archive(tmp_path, monkeypatch):
     extracted = updater.download(update, lambda _value: None)
     assert extracted.name == executable_name
     assert extracted.read_bytes() == payload
+
+
+def test_linux_system_install_can_update_with_pkexec(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sys, "executable", "/usr/bin/Blocksmith")
+    monkeypatch.setattr(os, "access", lambda _path, _mode: False)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    assert GitHubUpdater.can_self_update()[0] is True
+    assert GitHubUpdater.requires_elevation() is True
+
+
+def test_linux_system_install_needs_pkexec(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sys, "executable", "/usr/bin/Blocksmith")
+    monkeypatch.setattr(os, "access", lambda _path, _mode: False)
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    allowed, reason = GitHubUpdater.can_self_update()
+    assert allowed is False
+    assert "pkexec" in reason
 
 
 def test_mod_install_protocol_round_trip():

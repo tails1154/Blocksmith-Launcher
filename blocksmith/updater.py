@@ -7,6 +7,7 @@ import os
 import platform
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -170,8 +171,16 @@ class GitHubUpdater:
             return False, "Source checkouts should update with git pull."
         executable = Path(sys.executable).resolve()
         if not os.access(executable.parent, os.W_OK):
-            return False, "This installation is managed by the system. Update it with your package manager."
+            if sys.platform.startswith("linux") and shutil.which("pkexec") and shutil.which("install"):
+                return True, "Administrator authentication will be required to update this installation."
+            return False, "This installation is managed by the system and pkexec is unavailable. Update it with your package manager."
         return True, ""
+
+    @staticmethod
+    def requires_elevation() -> bool:
+        if not getattr(sys, "frozen", False) or not sys.platform.startswith("linux"):
+            return False
+        return not os.access(Path(sys.executable).resolve().parent, os.W_OK)
 
     @staticmethod
     def apply_and_restart(new_executable: Path) -> None:
@@ -199,13 +208,29 @@ class GitHubUpdater:
             )
         else:
             helper = helper_dir / "install-update.sh"
+            elevated = GitHubUpdater.requires_elevation()
+            if elevated:
+                pkexec = shutil.which("pkexec")
+                install = shutil.which("install")
+                if not pkexec or not install:
+                    raise UpdateError("pkexec is required to update this system installation.")
+                replace = (
+                    f"{shlex.quote(pkexec)} {shlex.quote(install)} -m 755 "
+                    f"{shlex.quote(str(new_executable))} {shlex.quote(str(target))}\n"
+                )
+            else:
+                replace = (
+                    f"mv -f {shlex.quote(str(new_executable))} {shlex.quote(str(target))}\n"
+                    f"chmod 755 {shlex.quote(str(target))}\n"
+                )
             helper.write_text(
                 "#!/bin/sh\n"
                 f"while kill -0 {pid} 2>/dev/null; do sleep 1; done\n"
-                f"mv -f {shlex.quote(str(new_executable))} {shlex.quote(str(target))}\n"
-                f"chmod 755 {shlex.quote(str(target))}\n"
-                "rm -f \"$0\"\n"
-                f"exec {shlex.quote(str(target))}\n",
+                + replace
+                + "status=$?\n"
+                + "rm -f \"$0\"\n"
+                + "[ \"$status\" -eq 0 ] || exit \"$status\"\n"
+                + f"exec {shlex.quote(str(target))}\n",
                 encoding="utf-8",
             )
             helper.chmod(0o755)
