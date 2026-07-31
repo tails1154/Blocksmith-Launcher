@@ -245,10 +245,12 @@ def test_discord_rpc_sends_latest_presence(monkeypatch):
     commands.put({"details": "In launcher", "state": "Profile A"})
     commands.put({"details": "Playing", "state": "Profile B"})
     commands.put(None)
+    statuses = []
     monkeypatch.setitem(sys.modules, "pypresence", SimpleNamespace(Presence=FakePresence))
-    DiscordRPC._worker(commands, "123456789012345678")
+    DiscordRPC._worker(commands, "123456789012345678", statuses.append)
     updates = [call for call in calls if call[0] == "update"]
     assert updates == [("update", {"details": "Playing", "state": "Profile B"})]
+    assert statuses == ["Connected to Discord."]
 
 
 def test_mod_install_protocol_round_trip():

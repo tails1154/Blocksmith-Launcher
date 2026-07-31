@@ -99,6 +99,7 @@ class BlocksmithApp(tk.Tk):
         self.discord = DiscordRPC(
             self.settings.get("discord_client_id", DEFAULT_CLIENT_ID),
             bool(self.settings.get("discord_rpc", True)),
+            lambda message: self.events.put(("discord_status", message)),
         )
         self.protocol("WM_DELETE_WINDOW", self.close_app)
         self.after(80, self._poll_events)
@@ -415,6 +416,7 @@ class BlocksmithApp(tk.Tk):
         )
         self.discord_client_id.pack(side="left", fill="x", expand=True, padx=12)
         ttk.Button(discord_row, text="Save", command=self.save_discord_settings).pack(side="right")
+        ttk.Button(discord_row, text="Reconnect", command=self.reconnect_discord).pack(side="right", padx=(0, 8))
         self.discord_status = ttk.Label(
             discord_card, text="Create an application in Discord's Developer Portal and paste its ID here.",
             style="Dirt.TLabel", foreground=theme.MUTED,
@@ -569,9 +571,16 @@ class BlocksmithApp(tk.Tk):
         self.storage.save_settings(self.settings)
         self.discord.configure(client_id, enabled)
         self.discord_status.config(
-            text="Rich Presence enabled. Discord will connect in the background."
+            text="Connecting to Discord…"
             if enabled else "Rich Presence disabled."
         )
+
+    def reconnect_discord(self) -> None:
+        self.save_discord_settings()
+        if self.discord_enabled.get():
+            profile = self.active_profile
+            state = f"Browsing {profile.name} · {profile.minecraft_version}" if profile else "Choosing a profile"
+            self.discord.update("In the launcher", state)
 
     def copy_install_link(self) -> None:
         selected = self.mod_results.selection()
@@ -981,6 +990,8 @@ class BlocksmithApp(tk.Tk):
                     self.mod_progress["value"] = float(value) * 100
                 elif kind == "account":
                     self.account_label.config(text=value)
+                elif kind == "discord_status":
+                    self.discord_status.config(text=value)
                 elif kind == "mod_results":
                     self.mod_projects = {str(project.id): project for project in value}
                     self.mod_results.delete(*self.mod_results.get_children())
