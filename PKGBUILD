@@ -1,6 +1,6 @@
 # Maintainer: tails1154
 pkgname=blocksmith-launcher
-pkgver=0.2.0
+pkgver=2.1.0
 pkgrel=1
 pkgdesc='Minecraft Java launcher powered by PortableMC and Modrinth'
 arch=('x86_64')
@@ -14,7 +14,7 @@ source=(
   'portablemc-4.4.1.whl::https://files.pythonhosted.org/packages/68/92/3ffda059f75068caf1de17c78c29d3a0746835d598e82abf77180092d124/portablemc-4.4.1-py3-none-any.whl'
 )
 sha256sums=(
-  '9089a75fabb16c968d50f43b3c5736e886094334842c25c6377bef9fa256f4d2'
+  'fbcbe100e8b751f23f24e1541d7649dc70d9319a407930f670aa20183695a00d'
   '82435214f4745fb0b5a6dbbb065b1b22723f5805d2468a74c896b33733eb2de6'
 )
 
