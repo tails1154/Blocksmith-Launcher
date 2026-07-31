@@ -2,9 +2,11 @@ import json
 import hashlib
 import io
 import os
+import queue
 import sys
 import tarfile
 import zipfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,6 +17,7 @@ from blocksmith.modrinth import ModrinthClient
 from blocksmith.storage import LauncherStorage
 from blocksmith.updater import GitHubUpdater
 from blocksmith.protocol import ProtocolError, install_uri, parse_uri
+from blocksmith.discord_rpc import DiscordRPC
 
 
 def test_profile_round_trip(tmp_path):
@@ -220,6 +223,32 @@ def test_linux_self_updates_are_disabled(monkeypatch):
     allowed, reason = GitHubUpdater.can_self_update()
     assert allowed is False
     assert "disabled on Linux" in reason
+
+
+def test_discord_rpc_sends_latest_presence(monkeypatch):
+    calls = []
+
+    class FakePresence:
+        def __init__(self, client_id):
+            calls.append(("client", client_id))
+
+        def connect(self):
+            calls.append(("connect",))
+
+        def update(self, **payload):
+            calls.append(("update", payload))
+
+        def close(self):
+            calls.append(("close",))
+
+    commands = queue.Queue()
+    commands.put({"details": "In launcher", "state": "Profile A"})
+    commands.put({"details": "Playing", "state": "Profile B"})
+    commands.put(None)
+    monkeypatch.setitem(sys.modules, "pypresence", SimpleNamespace(Presence=FakePresence))
+    DiscordRPC._worker(commands, "123456789012345678")
+    updates = [call for call in calls if call[0] == "update"]
+    assert updates == [("update", {"details": "Playing", "state": "Profile B"})]
 
 
 def test_mod_install_protocol_round_trip():

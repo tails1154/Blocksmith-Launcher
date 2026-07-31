@@ -83,6 +83,13 @@ the portable launcher on Windows or Linux. The Mods search results also include
 a **Copy install link** button for sharing links. Installed Linux desktop
 packages advertise the protocol through their desktop entry.
 
+## Discord Rich Presence
+
+Rich Presence is enabled by default using Blocksmith's bundled Discord application ID. It shows the
+selected profile while browsing and the Minecraft version, profile, and loader while the game is
+running. It can be disabled or given a different application ID in **Settings → Discord Rich
+Presence**. Discord being closed or unavailable never prevents Minecraft from launching.
+
 ## Profiles and data
 
 Launcher data is stored in the operating system's application-data directory.

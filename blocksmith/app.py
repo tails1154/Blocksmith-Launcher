@@ -13,6 +13,7 @@ from tkinter import messagebox, ttk
 
 from .auth import MicrosoftAuthenticator
 from .curseforge import ModManager
+from .discord_rpc import DEFAULT_CLIENT_ID, DiscordRPC
 from .minecraft import MinecraftService
 from .modrinth import ModrinthClient
 from .models import LOADERS, Profile
@@ -95,6 +96,11 @@ class BlocksmithApp(tk.Tk):
         self.busy = False
         self._styles()
         self._layout()
+        self.discord = DiscordRPC(
+            self.settings.get("discord_client_id", DEFAULT_CLIENT_ID),
+            bool(self.settings.get("discord_rpc", True)),
+        )
+        self.protocol("WM_DELETE_WINDOW", self.close_app)
         self.after(80, self._poll_events)
         if not self.profiles:
             self.after(250, self.open_profile_dialog)
@@ -389,6 +395,31 @@ class BlocksmithApp(tk.Tk):
         )
         self.protocol_status.pack(side="left")
         ttk.Button(protocol_row, text="Register install links", command=self.register_mod_protocol).pack(side="right")
+        discord_card = ttk.Frame(settings_tab, style="Dirt.TFrame", padding=20)
+        discord_card.pack(fill="x", pady=(16, 0))
+        ttk.Label(discord_card, text="DISCORD RICH PRESENCE", style="Dirt.TLabel", foreground="#d9c29f", font=("DejaVu Sans", 10, "bold")).pack(anchor="w")
+        ttk.Label(
+            discord_card,
+            text="Show your selected Minecraft profile and play status in Discord.",
+            style="Dirt.TLabel", foreground=theme.MUTED,
+        ).pack(anchor="w", pady=(5, 10))
+        discord_row = ttk.Frame(discord_card, style="Dirt.TFrame")
+        discord_row.pack(fill="x")
+        self.discord_enabled = tk.BooleanVar(value=bool(self.settings.get("discord_rpc", True)))
+        ttk.Checkbutton(discord_row, text="Enabled", variable=self.discord_enabled).pack(side="left")
+        self.discord_client_id = PlaceholderEntry(
+            discord_row,
+            "Discord application ID, e.g. 123456789012345678",
+            self.settings.get("discord_client_id", DEFAULT_CLIENT_ID),
+            width=43,
+        )
+        self.discord_client_id.pack(side="left", fill="x", expand=True, padx=12)
+        ttk.Button(discord_row, text="Save", command=self.save_discord_settings).pack(side="right")
+        self.discord_status = ttk.Label(
+            discord_card, text="Create an application in Discord's Developer Portal and paste its ID here.",
+            style="Dirt.TLabel", foreground=theme.MUTED,
+        )
+        self.discord_status.pack(anchor="w", pady=(9, 0))
         storage_card = ttk.Frame(settings_tab, style="Dirt.TFrame", padding=20)
         update_card = ttk.Frame(settings_tab, style="Dirt.TFrame", padding=20)
         update_card.pack(fill="x", pady=(16, 0))
@@ -456,6 +487,8 @@ class BlocksmithApp(tk.Tk):
         )
         self.status_label.config(text="Installed" if profile.installed else "Ready to install")
         self.mods_context.config(text=f"{profile.name} · Minecraft {profile.minecraft_version} · {profile.loader}")
+        if hasattr(self, "discord"):
+            self.discord.update("In the launcher", f"Browsing {profile.name} · {profile.minecraft_version}")
         self.refresh_profiles()
         self.refresh_installed_mods()
 
@@ -524,6 +557,21 @@ class BlocksmithApp(tk.Tk):
             messagebox.showinfo("Mod install links", message)
         except Exception as exc:
             messagebox.showerror("Protocol registration failed", str(exc))
+
+    def save_discord_settings(self) -> None:
+        client_id = self.discord_client_id.get().strip()
+        enabled = self.discord_enabled.get()
+        if enabled and (not client_id.isdigit() or len(client_id) < 15):
+            messagebox.showerror("Discord Rich Presence", "Enter a valid numeric Discord application ID first.")
+            return
+        self.settings["discord_rpc"] = enabled
+        self.settings["discord_client_id"] = client_id
+        self.storage.save_settings(self.settings)
+        self.discord.configure(client_id, enabled)
+        self.discord_status.config(
+            text="Rich Presence enabled. Discord will connect in the background."
+            if enabled else "Rich Presence disabled."
+        )
 
     def copy_install_link(self) -> None:
         selected = self.mod_results.selection()
@@ -866,9 +914,13 @@ class BlocksmithApp(tk.Tk):
         self._run_task(lambda: self._install_task(profile))
 
     def _install_task(self, profile):
-        self.minecraft.install(profile, lambda text: self.events.put(("log", text)), lambda value: self.events.put(("progress", value)))
-        profile.installed = True
-        self.storage.save_profiles(self.profiles)
+        self.discord.update("Preparing Minecraft", f"Installing {profile.name}")
+        try:
+            self.minecraft.install(profile, lambda text: self.events.put(("log", text)), lambda value: self.events.put(("progress", value)))
+            profile.installed = True
+            self.storage.save_profiles(self.profiles)
+        finally:
+            self.discord.update("In the launcher", f"Browsing {profile.name} · {profile.minecraft_version}")
 
     def play(self) -> None:
         if self.active_profile is None:
@@ -894,8 +946,20 @@ class BlocksmithApp(tk.Tk):
             profile.installed = True
             profile.last_played = datetime.now().isoformat(timespec="seconds")
             self.storage.save_profiles(self.profiles)
-            self.minecraft.launch(profile, session, emit, progress)
+            self.discord.update(
+                f"Playing Minecraft {profile.minecraft_version}",
+                f"{profile.name} · {profile.loader}",
+                playing=True,
+            )
+            try:
+                self.minecraft.launch(profile, session, emit, progress)
+            finally:
+                self.discord.update("In the launcher", f"Browsing {profile.name} · {profile.minecraft_version}")
         self._run_task(task)
+
+    def close_app(self) -> None:
+        self.discord.close()
+        self.destroy()
 
     def log_message(self, text: str) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")

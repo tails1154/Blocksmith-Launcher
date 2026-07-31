@@ -60,7 +60,7 @@ prepare_wine_python() {
     wineserver -w
   fi
   wine "$WINDOWS_PYTHON_EXE" -m pip install --upgrade pip "pyinstaller>=6.10" \
-    "portablemc>=4.4,<5" "platformdirs>=4.0"
+    "portablemc>=4.4,<5" "platformdirs>=4.0" "pypresence>=4.3,<5"
 }
 
 build_windows() {
