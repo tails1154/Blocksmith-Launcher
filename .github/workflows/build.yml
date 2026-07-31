@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Test Python ${{ matrix.python-version }}
@@ -111,6 +115,42 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          files: |
+            release-assets/Blocksmith-linux-x86_64.tar.gz
+            release-assets/Blocksmith-linux-x86_64.sha256
+            release-assets/Blocksmith-windows-x86_64.zip
+            release-assets/Blocksmith-windows-x86_64.sha256
+
+  development-release:
+    name: Publish rolling development build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Blocksmith-*
+          path: release-assets
+          merge-multiple: true
+      - name: Move development tag to this commit
+        run: |
+          git tag --force development "$GITHUB_SHA"
+          git push origin refs/tags/development --force
+      - name: Publish development prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: development
+          name: Blocksmith Development Build
+          prerelease: true
+          make_latest: false
+          target_commitish: ${{ github.sha }}
+          body: |
+            Automated development build from `${{ github.sha }}`.
+
+            This release is replaced after every successful push to `main` and may be unstable.
           files: |
             release-assets/Blocksmith-linux-x86_64.tar.gz
             release-assets/Blocksmith-linux-x86_64.sha256

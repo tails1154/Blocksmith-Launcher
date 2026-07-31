@@ -1,4 +1,9 @@
 import json
+import hashlib
+import io
+import sys
+import tarfile
+import zipfile
 
 import pytest
 
@@ -7,6 +12,7 @@ from blocksmith.curseforge import ModManager, ModProject
 from blocksmith.models import Profile
 from blocksmith.modrinth import ModrinthClient
 from blocksmith.storage import LauncherStorage
+from blocksmith.updater import GitHubUpdater
 
 
 def test_profile_round_trip(tmp_path):
@@ -114,3 +120,56 @@ def test_modrinth_normalizes_versions_and_required_dependencies(monkeypatch):
     assert files[0]["fileName"] == "example.jar"
     assert files[0]["downloadUrl"] == "https://cdn.example/mod.jar"
     assert files[0]["dependencies"] == [{"modId": "fabric-api", "relationType": 3}]
+
+
+def test_updater_stable_version_and_development_asset_identity(monkeypatch):
+    wanted = GitHubUpdater.platform_asset()
+    release = {
+        "id": 10,
+        "tag_name": "v0.2.0",
+        "name": "Version 0.2.0",
+        "html_url": "https://example.invalid/release",
+        "draft": False,
+        "assets": [
+            {"id": 99, "name": wanted, "browser_download_url": "https://example.invalid/app"},
+            {"id": 100, "name": wanted + ".sha256", "browser_download_url": "https://example.invalid/hash"},
+        ],
+    }
+    monkeypatch.setattr(GitHubUpdater, "_json", staticmethod(lambda _url: release))
+    updater = GitHubUpdater("0.1.0")
+    assert updater.check("Stable").version == "v0.2.0"
+    assert GitHubUpdater("0.2.0").check("Stable") is None
+    development = updater.check("Development")
+    assert development.release_id == 99
+    assert updater.check("Development", installed_release_id=99) is None
+
+
+def test_updater_verifies_and_extracts_platform_archive(tmp_path, monkeypatch):
+    updater = GitHubUpdater()
+    wanted = updater.platform_asset()
+    executable_name = "Blocksmith.exe" if sys.platform == "win32" else "Blocksmith"
+    payload = b"new blocksmith executable"
+    archive_buffer = io.BytesIO()
+    if wanted.endswith(".zip"):
+        with zipfile.ZipFile(archive_buffer, "w") as archive:
+            archive.writestr(executable_name, payload)
+    else:
+        with tarfile.open(fileobj=archive_buffer, mode="w:gz") as archive:
+            info = tarfile.TarInfo(executable_name)
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+    archive_data = archive_buffer.getvalue()
+    digest = hashlib.sha256(archive_data).hexdigest()
+    update = type("Update", (), {
+        "asset_name": wanted,
+        "checksum_url": "checksum",
+        "download_url": "artifact",
+    })()
+    monkeypatch.setattr(
+        updater,
+        "_download",
+        lambda url, progress=None: f"{digest}  {wanted}\n".encode() if url == "checksum" else archive_data,
+    )
+    extracted = updater.download(update, lambda _value: None)
+    assert extracted.name == executable_name
+    assert extracted.read_bytes() == payload

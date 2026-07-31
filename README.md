@@ -50,6 +50,21 @@ environment under `build/venv-linux`, which avoids changing system Python.
 The generated application artwork is in `assets/`, including a multi-resolution
 Windows `.ico` and PNG desktop icons.
 
+## Updates
+
+Packaged portable builds can update themselves from GitHub Releases. Open
+**Settings → Updates** to choose a channel:
+
+- **Stable** follows normal versioned releases.
+- **Development** follows the rolling prerelease built from every successful
+  push to `main`.
+
+Blocksmith downloads the platform archive and its published SHA-256 checksum,
+verifies the archive, and only then stages a replacement and restarts. Linux
+installations under system-owned paths such as `/usr/bin` are not modified;
+update those through the package manager. Source checkouts should use
+`git pull`.
+
 ## Profiles and data
 
 Launcher data is stored in the operating system's application-data directory.

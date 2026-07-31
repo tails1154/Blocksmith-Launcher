@@ -14,6 +14,7 @@ from .modrinth import ModrinthClient
 from .models import LOADERS, Profile
 from .resources import resource_path
 from .storage import LauncherStorage
+from .updater import GitHubUpdater, UpdateError
 from . import theme
 
 
@@ -79,6 +80,8 @@ class BlocksmithApp(tk.Tk):
         self.auth = MicrosoftAuthenticator(self.storage.auth_file)
         self.events: queue.Queue = queue.Queue()
         self.mod_projects = {}
+        self.updater = GitHubUpdater()
+        self.available_update = None
         self.active_profile: Profile | None = None
         self.busy = False
         self._styles()
@@ -88,6 +91,8 @@ class BlocksmithApp(tk.Tk):
             self.after(250, self.open_profile_dialog)
         else:
             self.select_profile(self.profiles[0])
+        if self.settings.get("check_updates", True):
+            self.after(1500, lambda: self.check_for_updates(silent=True))
 
     def _styles(self) -> None:
         # Tk's option database also controls popup menus and list portions of
@@ -339,6 +344,25 @@ class BlocksmithApp(tk.Tk):
             font=("DejaVu Sans Mono", 9),
         ).pack(anchor="w")
         storage_card = ttk.Frame(settings_tab, style="Dirt.TFrame", padding=20)
+        update_card = ttk.Frame(settings_tab, style="Dirt.TFrame", padding=20)
+        update_card.pack(fill="x", pady=(16, 0))
+        ttk.Label(update_card, text="UPDATES", style="Dirt.TLabel", foreground="#d9c29f", font=("DejaVu Sans", 10, "bold")).pack(anchor="w")
+        update_row = ttk.Frame(update_card, style="Dirt.TFrame")
+        update_row.pack(fill="x", pady=(10, 8))
+        ttk.Label(update_row, text="Channel", style="Dirt.TLabel", foreground=theme.MUTED).pack(side="left")
+        self.update_channel = tk.StringVar(value=self.settings.get("update_channel", "Stable"))
+        channel_box = ttk.Combobox(update_row, textvariable=self.update_channel, values=("Stable", "Development"), state="readonly", width=16)
+        channel_box.pack(side="left", padx=(10, 14))
+        channel_box.bind("<<ComboboxSelected>>", lambda _event: self.save_update_channel())
+        ttk.Button(update_row, text="Check now", command=self.check_for_updates).pack(side="left")
+        self.update_button = ttk.Button(update_row, text="Download and restart", command=self.download_update, state="disabled")
+        self.update_button.pack(side="right")
+        self.update_status = ttk.Label(update_card, text="Updates are checked automatically.", style="Dirt.TLabel", foreground=theme.MUTED)
+        self.update_status.pack(anchor="w")
+        self.update_progress = ttk.Progressbar(update_card, mode="determinate", maximum=100)
+        self.update_progress.pack(fill="x", pady=(9, 0))
+
+        storage_card = ttk.Frame(settings_tab, style="Dirt.TFrame", padding=20)
         storage_card.pack(fill="x", pady=(16, 0))
         ttk.Label(storage_card, text="DATA DIRECTORY", style="Dirt.TLabel", foreground="#d9c29f", font=("DejaVu Sans", 10, "bold")).pack(anchor="w")
         ttk.Label(storage_card, text=str(self.storage.root), style="Dirt.TLabel", foreground=theme.MUTED).pack(anchor="w", pady=(5, 0))
@@ -439,6 +463,49 @@ class BlocksmithApp(tk.Tk):
 
     def _mod_manager(self) -> ModManager:
         return ModManager(self.storage, ModrinthClient())
+
+    def save_update_channel(self) -> None:
+        self.settings["update_channel"] = self.update_channel.get()
+        self.settings.pop("development_release_id", None)
+        self.storage.save_settings(self.settings)
+        self.available_update = None
+        self.update_button.config(state="disabled")
+        self.update_status.config(text=f"Using the {self.update_channel.get()} update channel.")
+
+    def check_for_updates(self, silent: bool = False) -> None:
+        channel = self.update_channel.get()
+        installed = self.settings.get("development_release_id") if channel == "Development" else None
+        self.update_status.config(text=f"Checking {channel.lower()} releases…")
+
+        def worker():
+            try:
+                update = self.updater.check(channel, installed)
+                self.events.put(("update_available", (update, silent)))
+            except Exception as exc:
+                self.events.put(("update_error", (exc, silent)))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def download_update(self) -> None:
+        update = self.available_update
+        if update is None:
+            return
+        allowed, reason = self.updater.can_self_update()
+        if not allowed:
+            messagebox.showinfo("Blocksmith update", reason + "\n\nRelease: " + update.page_url)
+            return
+        self.update_button.config(state="disabled")
+        self.update_status.config(text=f"Downloading {update.name}…")
+        self.update_progress["value"] = 0
+
+        def worker():
+            try:
+                executable = self.updater.download(
+                    update, lambda value: self.events.put(("update_progress", value))
+                )
+                self.events.put(("update_ready", (update, executable)))
+            except Exception as exc:
+                self.events.put(("update_error", (exc, False)))
+        threading.Thread(target=worker, daemon=True).start()
 
     def search_mods(self) -> None:
         profile = self.active_profile
@@ -685,6 +752,48 @@ class BlocksmithApp(tk.Tk):
                     self.log_message(f"Found {len(value)} compatible Modrinth mods.")
                 elif kind == "mods_refresh":
                     self.refresh_installed_mods()
+                elif kind == "update_available":
+                    update, silent = value
+                    self.available_update = update
+                    if update is None:
+                        self.update_button.config(state="disabled")
+                        self.update_status.config(text="Blocksmith is up to date.")
+                        if not silent:
+                            messagebox.showinfo("Blocksmith update", "You already have the newest build.")
+                    else:
+                        self.update_status.config(text=f"{update.name} is available.")
+                        self.update_button.config(state="normal")
+                        if not silent:
+                            messagebox.showinfo("Blocksmith update", f"{update.name} is ready to download.")
+                elif kind == "update_progress":
+                    self.update_progress["value"] = float(value) * 100
+                elif kind == "update_ready":
+                    update, executable = value
+                    self.update_progress["value"] = 100
+                    self.update_status.config(text="Verified. Ready to restart.")
+                    if messagebox.askyesno(
+                        "Install update?",
+                        f"{update.name} was downloaded and its SHA-256 checksum passed.\n\n"
+                        "Restart Blocksmith and install it now?",
+                    ):
+                        if update.channel == "Development":
+                            self.settings["development_release_id"] = update.release_id
+                            self.storage.save_settings(self.settings)
+                        try:
+                            self.updater.apply_and_restart(executable)
+                            self.destroy()
+                        except Exception as exc:
+                            self.update_button.config(state="normal")
+                            messagebox.showerror("Update failed", str(exc))
+                    else:
+                        self.update_button.config(state="normal")
+                elif kind == "update_error":
+                    error, silent = value
+                    self.update_status.config(text="Update check failed.")
+                    self.update_button.config(state="normal" if self.available_update else "disabled")
+                    self.log_message(f"Updater: {error}")
+                    if not silent:
+                        messagebox.showerror("Blocksmith update", str(error))
                 elif kind == "done":
                     self.busy = False
                     self.play_button.config(state="normal")
