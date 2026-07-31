@@ -1,0 +1,3 @@
+portablemc>=4.4,<5
+platformdirs>=4.0
+
