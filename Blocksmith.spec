@@ -31,7 +31,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # Compression/packing increases antivirus heuristic false positives for
+    # unsigned launchers. Keep every platform build explicitly unpacked.
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
