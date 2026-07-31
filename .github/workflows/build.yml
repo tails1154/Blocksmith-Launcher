@@ -1,0 +1,118 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest -r requirements.txt
+      - name: Run tests
+        run: python -m pytest -q
+
+  build-linux:
+    name: Build Linux x86-64
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tk
+        run: sudo apt-get update && sudo apt-get install --yes python3-tk
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip "pyinstaller>=6.10" -r requirements.txt
+      - name: Build application
+        run: >-
+          python -m PyInstaller --noconfirm --clean
+          --distpath dist/linux
+          --workpath build/pyinstaller-linux
+          Blocksmith.spec
+      - name: Package application
+        run: |
+          install -m 644 packaging/blocksmith.desktop dist/linux/blocksmith.desktop
+          install -m 644 assets/blocksmith-256.png dist/linux/blocksmith.png
+          tar -C dist/linux -czf dist/Blocksmith-linux-x86_64.tar.gz Blocksmith blocksmith.desktop blocksmith.png
+          sha256sum dist/Blocksmith-linux-x86_64.tar.gz > dist/Blocksmith-linux-x86_64.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Blocksmith-linux-x86_64
+          path: |
+            dist/Blocksmith-linux-x86_64.tar.gz
+            dist/Blocksmith-linux-x86_64.sha256
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows x86-64
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip "pyinstaller>=6.10" -r requirements.txt
+      - name: Build application
+        run: >-
+          python -m PyInstaller --noconfirm --clean
+          --distpath dist/windows
+          --workpath build/pyinstaller-windows
+          Blocksmith.spec
+      - name: Package application
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/windows/Blocksmith.exe -DestinationPath dist/Blocksmith-windows-x86_64.zip -Force
+          $hash = (Get-FileHash dist/Blocksmith-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  Blocksmith-windows-x86_64.zip" | Set-Content -Encoding ascii dist/Blocksmith-windows-x86_64.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Blocksmith-windows-x86_64
+          path: |
+            dist/Blocksmith-windows-x86_64.zip
+            dist/Blocksmith-windows-x86_64.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish release assets
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Blocksmith-*
+          path: release-assets
+          merge-multiple: true
+      - name: Upload tagged release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release-assets/Blocksmith-linux-x86_64.tar.gz
+            release-assets/Blocksmith-linux-x86_64.sha256
+            release-assets/Blocksmith-windows-x86_64.zip
+            release-assets/Blocksmith-windows-x86_64.sha256
