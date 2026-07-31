@@ -6,6 +6,8 @@ import time
 from typing import Callable
 
 DEFAULT_CLIENT_ID = "1532827104994005083"
+BLOCKSMITH_URL = "https://github.com/tails1154/Blocksmith-Launcher"
+MODRINTH_URL = "https://modrinth.com/mods"
 
 
 class DiscordRPC:
@@ -32,13 +34,23 @@ class DiscordRPC:
         if self.enabled:
             self.update("In the launcher", "Choosing a profile")
 
-    def update(self, details: str, state: str, *, playing: bool = False) -> None:
+    def update(
+        self,
+        details: str,
+        state: str,
+        *,
+        playing: bool = False,
+        modrinth_url: str = MODRINTH_URL,
+    ) -> None:
         if not self.enabled:
             return
         payload = {
             "details": details[:128],
             "state": state[:128],
-            "large_text": "Blocksmith Launcher",
+            "buttons": [
+                {"label": "Get Blocksmith", "url": BLOCKSMITH_URL},
+                {"label": "Browse on Modrinth", "url": modrinth_url},
+            ],
         }
         if playing:
             payload["start"] = int(time.time())

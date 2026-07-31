@@ -490,7 +490,7 @@ class BlocksmithApp(tk.Tk):
         self.status_label.config(text="Installed" if profile.installed else "Ready to install")
         self.mods_context.config(text=f"{profile.name} · Minecraft {profile.minecraft_version} · {profile.loader}")
         if hasattr(self, "discord"):
-            self.discord.update("In the launcher", f"Browsing {profile.name} · {profile.minecraft_version}")
+            self._update_profile_rpc(profile, "Browsing profiles")
         self.refresh_profiles()
         self.refresh_installed_mods()
 
@@ -579,8 +579,38 @@ class BlocksmithApp(tk.Tk):
         self.save_discord_settings()
         if self.discord_enabled.get():
             profile = self.active_profile
-            state = f"Browsing {profile.name} · {profile.minecraft_version}" if profile else "Choosing a profile"
-            self.discord.update("In the launcher", state)
+            if profile:
+                self._update_profile_rpc(profile, "Browsing profiles")
+            else:
+                self.discord.update("Setting up Blocksmith", "Choosing a first Minecraft profile")
+
+    def _update_profile_rpc(
+        self,
+        profile: Profile,
+        action: str,
+        *,
+        playing: bool = False,
+        extra: str = "",
+        modrinth_url: str = "https://modrinth.com/mods",
+    ) -> None:
+        try:
+            mods = self._mod_manager().installed(profile) if profile.loader != "Vanilla" else []
+        except Exception:
+            mods = []
+        enabled = sum(1 for mod in mods if mod.get("enabled"))
+        mod_text = "Vanilla" if profile.loader == "Vanilla" else f"{enabled}/{len(mods)} mods enabled"
+        loader = profile.loader + (f" {profile.loader_version}" if profile.loader_version else "")
+        details = f"{action} · Minecraft {profile.minecraft_version} · {loader}"
+        account = self.settings.get("mode", "Offline")
+        state_parts = [profile.name, mod_text, f"{profile.memory_mb // 1024} GB RAM", profile.resolution, account]
+        if extra:
+            state_parts.insert(1, extra)
+        self.discord.update(
+            details,
+            " · ".join(state_parts),
+            playing=playing,
+            modrinth_url=modrinth_url,
+        )
 
     def copy_install_link(self) -> None:
         selected = self.mod_results.selection()
@@ -746,6 +776,7 @@ class BlocksmithApp(tk.Tk):
         if not query:
             messagebox.showinfo("Modrinth", "Enter a mod name to search for.")
             return
+        self._update_profile_rpc(profile, "Searching Modrinth", extra=f'“{query}”')
 
         def task():
             results = self._mod_manager().client.search_mods(query, profile)
@@ -767,13 +798,22 @@ class BlocksmithApp(tk.Tk):
     def _install_project(self, project, profile: Profile) -> None:
         def task():
             manager = self._mod_manager()
-            manager.install(
-                project,
+            self._update_profile_rpc(
                 profile,
-                lambda text: self.events.put(("log", text)),
-                lambda value: self.events.put(("progress", value)),
+                "Installing a Modrinth mod",
+                extra=project.name,
+                modrinth_url=f"https://modrinth.com/mod/{project.slug or project.id}",
             )
-            self.events.put(("mods_refresh", None))
+            try:
+                manager.install(
+                    project,
+                    profile,
+                    lambda text: self.events.put(("log", text)),
+                    lambda value: self.events.put(("progress", value)),
+                )
+                self.events.put(("mods_refresh", None))
+            finally:
+                self._update_profile_rpc(profile, "Managing installed mods")
         self._run_task(task)
 
     def refresh_installed_mods(self) -> None:
@@ -923,13 +963,13 @@ class BlocksmithApp(tk.Tk):
         self._run_task(lambda: self._install_task(profile))
 
     def _install_task(self, profile):
-        self.discord.update("Preparing Minecraft", f"Installing {profile.name}")
+        self._update_profile_rpc(profile, "Installing Minecraft", extra="Downloading game files")
         try:
             self.minecraft.install(profile, lambda text: self.events.put(("log", text)), lambda value: self.events.put(("progress", value)))
             profile.installed = True
             self.storage.save_profiles(self.profiles)
         finally:
-            self.discord.update("In the launcher", f"Browsing {profile.name} · {profile.minecraft_version}")
+            self._update_profile_rpc(profile, "Ready to launch")
 
     def play(self) -> None:
         if self.active_profile is None:
@@ -955,15 +995,11 @@ class BlocksmithApp(tk.Tk):
             profile.installed = True
             profile.last_played = datetime.now().isoformat(timespec="seconds")
             self.storage.save_profiles(self.profiles)
-            self.discord.update(
-                f"Playing Minecraft {profile.minecraft_version}",
-                f"{profile.name} · {profile.loader}",
-                playing=True,
-            )
+            self._update_profile_rpc(profile, "Playing Minecraft", playing=True)
             try:
                 self.minecraft.launch(profile, session, emit, progress)
             finally:
-                self.discord.update("In the launcher", f"Browsing {profile.name} · {profile.minecraft_version}")
+                self._update_profile_rpc(profile, "Back in the launcher")
         self._run_task(task)
 
     def close_app(self) -> None:
