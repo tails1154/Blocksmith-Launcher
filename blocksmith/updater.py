@@ -88,7 +88,12 @@ class GitHubUpdater:
         wanted = self.platform_asset()
         assets = {asset["name"]: asset for asset in release.get("assets", [])}
         artifact = assets.get(wanted)
-        checksum = assets.get(wanted + ".sha256") or assets.get("SHA256SUMS.txt")
+        checksum_names = [
+            wanted + ".sha256",
+            wanted.removesuffix(".tar.gz").removesuffix(".zip") + ".sha256",
+            "SHA256SUMS.txt",
+        ]
+        checksum = next((assets.get(name) for name in checksum_names if assets.get(name)), None)
         if artifact is None or checksum is None:
             raise UpdateError(f"Release {release.get('tag_name')} has no verified {wanted} build.")
         if development and installed_release_id == int(artifact["id"]):

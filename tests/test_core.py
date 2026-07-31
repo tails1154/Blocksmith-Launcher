@@ -144,6 +144,20 @@ def test_updater_stable_version_and_development_asset_identity(monkeypatch):
     assert updater.check("Development", installed_release_id=99) is None
 
 
+def test_updater_accepts_packaged_checksum_filename(monkeypatch):
+    wanted = GitHubUpdater.platform_asset()
+    checksum_name = wanted.removesuffix(".tar.gz").removesuffix(".zip") + ".sha256"
+    release = {
+        "id": 10, "tag_name": "development", "name": "Development", "html_url": "", "draft": False,
+        "assets": [
+            {"id": 8, "name": wanted, "browser_download_url": "artifact"},
+            {"id": 9, "name": checksum_name, "browser_download_url": "checksum"},
+        ],
+    }
+    monkeypatch.setattr(GitHubUpdater, "_json", staticmethod(lambda _url: release))
+    assert GitHubUpdater().check("Development").checksum_url == "checksum"
+
+
 def test_updater_verifies_and_extracts_platform_archive(tmp_path, monkeypatch):
     updater = GitHubUpdater()
     wanted = updater.platform_asset()
