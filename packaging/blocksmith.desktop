@@ -2,9 +2,10 @@
 Type=Application
 Name=Blocksmith
 Comment=Minecraft Java launcher powered by PortableMC
-Exec=Blocksmith
+Exec=Blocksmith %u
 Icon=blocksmith
 Terminal=false
 Categories=Game;
 Keywords=Minecraft;Launcher;Modrinth;
 StartupWMClass=Blocksmith
+MimeType=x-scheme-handler/blocksmith;

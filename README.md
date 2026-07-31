@@ -65,6 +65,24 @@ installations under system-owned paths such as `/usr/bin` are not modified;
 update those through the package manager. Source checkouts should use
 `git pull`.
 
+## Two-click mod installation links
+
+Blocksmith supports confirmation-gated mod links:
+
+```text
+blocksmith://install/modrinth/AANobbMI
+```
+
+The first click opens the link. Blocksmith then resolves the project and asks
+which selected profile will receive it; the second click confirms installation.
+No link can install a file without this confirmation. Required dependencies are
+handled by the normal verified Modrinth installer.
+
+Use **Settings → Register install links** once to associate `blocksmith://` with
+the portable launcher on Windows or Linux. The Mods search results also include
+a **Copy install link** button for sharing links. Installed Linux desktop
+packages advertise the protocol through their desktop entry.
+
 ## Profiles and data
 
 Launcher data is stored in the operating system's application-data directory.

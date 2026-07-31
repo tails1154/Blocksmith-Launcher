@@ -12,9 +12,10 @@ from .curseforge import ModManager
 from .minecraft import MinecraftService
 from .modrinth import ModrinthClient
 from .models import LOADERS, Profile
+from .protocol import ProtocolError, install_uri, parse_uri, register_protocol
 from .resources import resource_path
 from .storage import LauncherStorage
-from .updater import GitHubUpdater, UpdateError
+from .updater import GitHubUpdater
 from . import theme
 
 
@@ -62,7 +63,7 @@ class PlaceholderEntry(tk.Entry):
 
 
 class BlocksmithApp(tk.Tk):
-    def __init__(self) -> None:
+    def __init__(self, protocol_uri: str | None = None) -> None:
         super().__init__()
         self.title("Blocksmith Launcher")
         try:
@@ -70,7 +71,7 @@ class BlocksmithApp(tk.Tk):
             self.iconphoto(True, self._window_icon)
         except tk.TclError:
             pass
-        self.geometry("1280x800")
+        self.geometry("1280x840")
         self.minsize(1040, 680)
         self.configure(bg=theme.BG)
         self.storage = LauncherStorage()
@@ -82,6 +83,7 @@ class BlocksmithApp(tk.Tk):
         self.mod_projects = {}
         self.updater = GitHubUpdater()
         self.available_update = None
+        self.pending_protocol_uri = protocol_uri
         self.active_profile: Profile | None = None
         self.busy = False
         self._styles()
@@ -90,9 +92,13 @@ class BlocksmithApp(tk.Tk):
         if not self.profiles:
             self.after(250, self.open_profile_dialog)
         else:
-            self.select_profile(self.profiles[0])
+            last_id = self.settings.get("last_profile_id")
+            selected = next((profile for profile in self.profiles if profile.id == last_id), self.profiles[0])
+            self.select_profile(selected)
         if self.settings.get("check_updates", True):
             self.after(1500, lambda: self.check_for_updates(silent=True))
+        if protocol_uri:
+            self.after(700, lambda: self.handle_protocol_uri(protocol_uri))
 
     def _styles(self) -> None:
         # Tk's option database also controls popup menus and list portions of
@@ -299,8 +305,11 @@ class BlocksmithApp(tk.Tk):
         self.mod_results.column("author", width=125)
         self.mod_results.column("downloads", width=90, anchor="e")
         self.mod_results.pack(fill="both", expand=True)
-        self.install_mod_button = ttk.Button(search_panel, text="Install selected + dependencies", style="Accent.TButton", command=self.install_selected_mod)
-        self.install_mod_button.pack(anchor="e", pady=(8, 14))
+        result_actions = ttk.Frame(search_panel)
+        result_actions.pack(fill="x", pady=(8, 14))
+        ttk.Button(result_actions, text="Copy install link", command=self.copy_install_link).pack(side="left")
+        self.install_mod_button = ttk.Button(result_actions, text="Install selected + dependencies", style="Accent.TButton", command=self.install_selected_mod)
+        self.install_mod_button.pack(side="right")
         installed_head = ttk.Frame(installed_panel)
         installed_head.pack(fill="x", pady=(0, 5))
         ttk.Label(installed_head, text="INSTALLED IN THIS PROFILE", style="Muted.TLabel", font=("DejaVu Sans", 9, "bold")).pack(side="left")
@@ -343,6 +352,14 @@ class BlocksmithApp(tk.Tk):
             cf_card, text="Provider: api.modrinth.com", style="Stone.TLabel", foreground=theme.TEXT,
             font=("DejaVu Sans Mono", 9),
         ).pack(anchor="w")
+        protocol_row = ttk.Frame(cf_card, style="Stone.TFrame")
+        protocol_row.pack(fill="x", pady=(14, 0))
+        self.protocol_status = ttk.Label(
+            protocol_row, text="Enable blocksmith:// links for two-click mod installs.",
+            style="Stone.TLabel", foreground=theme.MUTED,
+        )
+        self.protocol_status.pack(side="left")
+        ttk.Button(protocol_row, text="Register install links", command=self.register_mod_protocol).pack(side="right")
         storage_card = ttk.Frame(settings_tab, style="Dirt.TFrame", padding=20)
         update_card = ttk.Frame(settings_tab, style="Dirt.TFrame", padding=20)
         update_card.pack(fill="x", pady=(16, 0))
@@ -395,6 +412,8 @@ class BlocksmithApp(tk.Tk):
 
     def select_profile(self, profile: Profile) -> None:
         self.active_profile = profile
+        self.settings["last_profile_id"] = profile.id
+        self.storage.save_settings(self.settings)
         self.profile_name.config(text=profile.name)
         self.profile_subtitle.config(text=profile.subtitle + f"  ·  {profile.memory_mb // 1024} GB memory")
         self.profile_tab_name.config(text=profile.name)
@@ -464,6 +483,52 @@ class BlocksmithApp(tk.Tk):
     def _mod_manager(self) -> ModManager:
         return ModManager(self.storage, ModrinthClient())
 
+    def register_mod_protocol(self) -> None:
+        try:
+            message = register_protocol()
+            self.protocol_status.config(text=message)
+            messagebox.showinfo("Mod install links", message)
+        except Exception as exc:
+            messagebox.showerror("Protocol registration failed", str(exc))
+
+    def copy_install_link(self) -> None:
+        selected = self.mod_results.selection()
+        if not selected:
+            messagebox.showinfo("Install link", "Select a Modrinth search result first.")
+            return
+        uri = install_uri(selected[0])
+        self.clipboard_clear()
+        self.clipboard_append(uri)
+        self.update()
+        self.mod_status.config(text="Install link copied to clipboard.")
+
+    def handle_protocol_uri(self, uri: str) -> None:
+        try:
+            request = parse_uri(uri)
+        except ProtocolError as exc:
+            messagebox.showerror("Invalid install link", str(exc))
+            return
+        profile = self.active_profile
+        if profile is None or profile.loader == "Vanilla":
+            profile = next((item for item in self.profiles if item.loader != "Vanilla"), None)
+        if profile is None:
+            messagebox.showerror(
+                "Modded profile required",
+                "Create a Fabric, Forge, NeoForge, or Quilt profile before opening this install link.",
+            )
+            return
+        self.select_profile(profile)
+        self.tabs.select(2)
+        self.mod_status.config(text="Resolving mod install link…")
+
+        def worker():
+            try:
+                project = ModrinthClient().project(request.project_id)
+                self.events.put(("protocol_project", (project, profile)))
+            except Exception as exc:
+                self.events.put(("protocol_error", exc))
+        threading.Thread(target=worker, daemon=True).start()
+
     def save_update_channel(self) -> None:
         self.settings["update_channel"] = self.update_channel.get()
         self.settings.pop("development_release_id", None)
@@ -532,6 +597,9 @@ class BlocksmithApp(tk.Tk):
         if project is None:
             return
 
+        self._install_project(project, profile)
+
+    def _install_project(self, project, profile: Profile) -> None:
         def task():
             manager = self._mod_manager()
             manager.install(
@@ -752,6 +820,24 @@ class BlocksmithApp(tk.Tk):
                     self.log_message(f"Found {len(value)} compatible Modrinth mods.")
                 elif kind == "mods_refresh":
                     self.refresh_installed_mods()
+                elif kind == "protocol_project":
+                    project, profile = value
+                    confirmed = messagebox.askyesno(
+                        "Install this mod?",
+                        f"Install {project.name} into {profile.name}?\n\n"
+                        f"Minecraft {profile.minecraft_version} · {profile.loader}\n"
+                        f"Provider: Modrinth\n\n"
+                        "Required dependencies will also be installed.",
+                        icon="question",
+                    )
+                    if confirmed:
+                        self.mod_status.config(text=f"Installing {project.name}…")
+                        self._install_project(project, profile)
+                    else:
+                        self.mod_status.config(text="Install cancelled.")
+                elif kind == "protocol_error":
+                    self.mod_status.config(text="Install link failed.")
+                    messagebox.showerror("Could not resolve mod", str(value))
                 elif kind == "update_available":
                     update, silent = value
                     self.available_update = update
@@ -818,7 +904,10 @@ class BlocksmithApp(tk.Tk):
 
 
 def main() -> None:
-    BlocksmithApp().mainloop()
+    import sys
+
+    protocol_uri = next((arg for arg in sys.argv[1:] if arg.lower().startswith("blocksmith:")), None)
+    BlocksmithApp(protocol_uri).mainloop()
 
 
 if __name__ == "__main__":

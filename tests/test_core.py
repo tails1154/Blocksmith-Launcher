@@ -13,6 +13,7 @@ from blocksmith.models import Profile
 from blocksmith.modrinth import ModrinthClient
 from blocksmith.storage import LauncherStorage
 from blocksmith.updater import GitHubUpdater
+from blocksmith.protocol import ProtocolError, install_uri, parse_uri
 
 
 def test_profile_round_trip(tmp_path):
@@ -187,3 +188,22 @@ def test_updater_verifies_and_extracts_platform_archive(tmp_path, monkeypatch):
     extracted = updater.download(update, lambda _value: None)
     assert extracted.name == executable_name
     assert extracted.read_bytes() == payload
+
+
+def test_mod_install_protocol_round_trip():
+    uri = install_uri("AANobbMI")
+    assert uri == "blocksmith://install/modrinth/AANobbMI"
+    request = parse_uri(uri)
+    assert request.provider == "modrinth"
+    assert request.project_id == "AANobbMI"
+
+
+@pytest.mark.parametrize("uri", [
+    "https://modrinth.com/mod/sodium",
+    "blocksmith://launch/modrinth/AANobbMI",
+    "blocksmith://install/curseforge/12345",
+    "blocksmith://install/modrinth/bad%20id",
+])
+def test_mod_install_protocol_rejects_untrusted_links(uri):
+    with pytest.raises(ProtocolError):
+        parse_uri(uri)
