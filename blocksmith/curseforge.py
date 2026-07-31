@@ -31,6 +31,11 @@ class ModProject:
     summary: str
     downloads: int
     author: str
+    icon_url: str = ""
+    body: str = ""
+    updated: str = ""
+    categories: tuple[str, ...] = ()
+    source_url: str = ""
 
     @classmethod
     def from_api(cls, data: dict) -> "ModProject":
@@ -42,6 +47,8 @@ class ModProject:
             summary=data.get("summary", ""),
             downloads=int(data.get("downloadCount", 0)),
             author=authors[0].get("name", "Unknown") if authors else "Unknown",
+            icon_url=(data.get("logo") or {}).get("thumbnailUrl", ""),
+            source_url=(data.get("links") or {}).get("websiteUrl", ""),
         )
 
 
@@ -204,6 +211,8 @@ class ModManager:
             "name": project.name,
             "filename": filename,
             "version": file.get("displayName", str(file["id"])),
+            "summary": project.summary,
+            "icon_url": project.icon_url,
         })
         self._save(profile, sorted(entries, key=lambda value: value["name"].lower()))
         emit(f"Installed {project.name}.")

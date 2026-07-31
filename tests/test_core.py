@@ -123,6 +123,25 @@ def test_modrinth_normalizes_versions_and_required_dependencies(monkeypatch):
     assert files[0]["dependencies"] == [{"modId": "fabric-api", "relationType": 3}]
 
 
+def test_modrinth_search_keeps_rich_project_metadata(monkeypatch):
+    client = ModrinthClient()
+    monkeypatch.setattr(client, "_request", lambda path, params=None: {"hits": [{
+        "project_id": "sodium",
+        "title": "Sodium",
+        "slug": "sodium",
+        "description": "A rendering optimization mod.",
+        "downloads": 1234,
+        "author": "jellysquid3",
+        "icon_url": "https://cdn.example/sodium.png",
+        "date_modified": "2026-01-02T03:04:05Z",
+        "categories": ["fabric", "optimization"],
+    }]})
+    project = client.search_mods("sodium", Profile("Fabric", "1.21.1", "Fabric"))[0]
+    assert project.icon_url == "https://cdn.example/sodium.png"
+    assert project.categories == ("fabric", "optimization")
+    assert project.source_url == "https://modrinth.com/mod/sodium"
+
+
 def test_updater_stable_version_and_development_asset_identity(monkeypatch):
     wanted = GitHubUpdater.platform_asset()
     release = {

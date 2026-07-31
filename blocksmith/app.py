@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import queue
+import base64
+import re
 import shutil
 import threading
 import tkinter as tk
+import webbrowser
 from datetime import datetime
 from tkinter import messagebox, ttk
 
@@ -81,6 +84,8 @@ class BlocksmithApp(tk.Tk):
         self.auth = MicrosoftAuthenticator(self.storage.auth_file)
         self.events: queue.Queue = queue.Queue()
         self.mod_projects = {}
+        self.mod_icons = {}
+        self.mod_detail_project = None
         self.updater = GitHubUpdater()
         self.available_update = None
         self.pending_protocol_uri = protocol_uri
@@ -305,11 +310,32 @@ class BlocksmithApp(tk.Tk):
         self.mod_results.column("author", width=125)
         self.mod_results.column("downloads", width=90, anchor="e")
         self.mod_results.pack(fill="both", expand=True)
+        self.mod_results.bind("<<TreeviewSelect>>", self.show_selected_mod)
+        self.mod_results.bind("<Double-1>", lambda _event: self.install_selected_mod())
         result_actions = ttk.Frame(search_panel)
         result_actions.pack(fill="x", pady=(8, 14))
         ttk.Button(result_actions, text="Copy install link", command=self.copy_install_link).pack(side="left")
         self.install_mod_button = ttk.Button(result_actions, text="Install selected + dependencies", style="Accent.TButton", command=self.install_selected_mod)
         self.install_mod_button.pack(side="right")
+        detail = ttk.Frame(search_panel, style="Stone.TFrame", padding=14)
+        detail.pack(fill="x", pady=(0, 14))
+        detail_top = ttk.Frame(detail, style="Stone.TFrame")
+        detail_top.pack(fill="x")
+        self.mod_icon = ttk.Label(detail_top, text="?", style="Stone.TLabel", anchor="center", font=("DejaVu Sans", 24, "bold"), width=5)
+        self.mod_icon.pack(side="left", padx=(0, 12))
+        detail_titles = ttk.Frame(detail_top, style="Stone.TFrame")
+        detail_titles.pack(side="left", fill="x", expand=True)
+        self.mod_detail_name = ttk.Label(detail_titles, text="Select a mod to preview it", style="Stone.TLabel", font=("DejaVu Sans", 12, "bold"))
+        self.mod_detail_name.pack(anchor="w")
+        self.mod_detail_meta = ttk.Label(detail_titles, text="Icons, details, and compatibility will appear here.", style="Stone.TLabel", foreground=theme.MUTED)
+        self.mod_detail_meta.pack(anchor="w", pady=(3, 0))
+        self.mod_detail_description = tk.Message(
+            detail, text="", bg=theme.PANEL_2, fg=theme.TEXT, font=theme.FONT,
+            width=500, justify="left", relief="flat", padx=0, pady=9,
+        )
+        self.mod_detail_description.pack(fill="x")
+        self.mod_page_button = ttk.Button(detail, text="View on Modrinth", command=self.open_selected_mod_page, state="disabled")
+        self.mod_page_button.pack(anchor="e")
         installed_head = ttk.Frame(installed_panel)
         installed_head.pack(fill="x", pady=(0, 5))
         ttk.Label(installed_head, text="INSTALLED IN THIS PROFILE", style="Muted.TLabel", font=("DejaVu Sans", 9, "bold")).pack(side="left")
@@ -322,6 +348,7 @@ class BlocksmithApp(tk.Tk):
         self.installed_mods.column("version", width=195)
         self.installed_mods.column("state", width=80)
         self.installed_mods.pack(fill="both", expand=True)
+        self.installed_mods.bind("<<TreeviewSelect>>", self.show_installed_mod)
         installed_actions = ttk.Frame(installed_panel)
         installed_actions.pack(fill="x", pady=(8, 0))
         ttk.Button(installed_actions, text="Enable / disable", command=self.toggle_selected_mod).pack(side="left")
@@ -501,6 +528,78 @@ class BlocksmithApp(tk.Tk):
         self.clipboard_append(uri)
         self.update()
         self.mod_status.config(text="Install link copied to clipboard.")
+
+    @staticmethod
+    def _plain_description(value: str, limit: int = 700) -> str:
+        """Turn common Markdown into a compact, safe preview for Tk."""
+        value = re.sub(r"!\[[^]]*\]\([^)]*\)", "", value or "")
+        value = re.sub(r"\[([^]]+)\]\([^)]*\)", r"\1", value)
+        value = re.sub(r"^#{1,6}\s*", "", value, flags=re.MULTILINE)
+        value = re.sub(r"[*_`>|]", "", value)
+        value = re.sub(r"\n{3,}", "\n\n", value).strip()
+        return value[:limit].rstrip() + ("…" if len(value) > limit else "")
+
+    def show_selected_mod(self, _event=None) -> None:
+        selected = self.mod_results.selection()
+        if not selected:
+            return
+        project = self.mod_projects.get(selected[0])
+        if project is None:
+            return
+        self._render_mod_detail(project)
+
+        # Search results contain a summary; fetch the full project body only
+        # when somebody actually selects the result.
+        project_id = str(project.id)
+        def worker():
+            try:
+                detailed = ModrinthClient().project(project_id)
+                self.events.put(("mod_detail", detailed))
+            except Exception:
+                pass
+        threading.Thread(target=worker, daemon=True).start()
+
+    def show_installed_mod(self, _event=None) -> None:
+        selected = self.installed_mods.selection()
+        if not selected:
+            return
+        project_id = selected[0]
+        self.tabs.select(2)
+        def worker():
+            try:
+                self.events.put(("mod_detail", ModrinthClient().project(project_id)))
+            except Exception as exc:
+                self.events.put(("mod_detail_error", exc))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _render_mod_detail(self, project) -> None:
+        self.mod_detail_project = project
+        self.mod_detail_name.config(text=project.name)
+        categories = ", ".join(project.categories[:4]) if project.categories else "Mod"
+        self.mod_detail_meta.config(
+            text=f"by {project.author}  ·  {project.downloads:,} downloads  ·  {categories}"
+        )
+        description = project.body or project.summary or "No description was provided."
+        self.mod_detail_description.config(text=self._plain_description(description))
+        self.mod_page_button.config(state="normal" if project.source_url else "disabled")
+        self.mod_icon.config(image="", text="?", width=5)
+        cached = self.mod_icons.get(str(project.id))
+        if cached is not None:
+            self.mod_icon.config(image=cached, text="", width=0)
+        elif project.icon_url:
+            project_id, icon_url = str(project.id), project.icon_url
+            def worker():
+                try:
+                    data = ModrinthClient().image(icon_url)
+                    self.events.put(("mod_icon", (project_id, data)))
+                except Exception:
+                    pass
+            threading.Thread(target=worker, daemon=True).start()
+
+    def open_selected_mod_page(self) -> None:
+        project = self.mod_detail_project
+        if project and project.source_url:
+            webbrowser.open(project.source_url)
 
     def handle_protocol_uri(self, uri: str) -> None:
         try:
@@ -818,6 +917,31 @@ class BlocksmithApp(tk.Tk):
                             values=(project.author, f"{project.downloads:,}"),
                         )
                     self.log_message(f"Found {len(value)} compatible Modrinth mods.")
+                    if value:
+                        first = str(value[0].id)
+                        self.mod_results.selection_set(first)
+                        self.mod_results.focus(first)
+                        self.show_selected_mod()
+                elif kind == "mod_detail":
+                    selected = self.mod_results.selection()
+                    installed = self.installed_mods.selection()
+                    if str(value.id) in selected or str(value.id) in installed:
+                        self.mod_projects[str(value.id)] = value
+                        self._render_mod_detail(value)
+                elif kind == "mod_detail_error":
+                    self.mod_status.config(text=f"Could not load mod details: {value}")
+                elif kind == "mod_icon":
+                    project_id, data = value
+                    try:
+                        image = tk.PhotoImage(data=base64.b64encode(data))
+                        scale = max(1, (max(image.width(), image.height()) + 63) // 64)
+                        if scale > 1:
+                            image = image.subsample(scale, scale)
+                        self.mod_icons[project_id] = image
+                        if self.mod_detail_project and str(self.mod_detail_project.id) == project_id:
+                            self.mod_icon.config(image=image, text="", width=0)
+                    except tk.TclError:
+                        pass
                 elif kind == "mods_refresh":
                     self.refresh_installed_mods()
                 elif kind == "protocol_project":

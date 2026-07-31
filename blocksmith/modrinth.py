@@ -56,6 +56,10 @@ class ModrinthClient:
                 summary=hit.get("description", ""),
                 downloads=int(hit.get("downloads", 0)),
                 author=hit.get("author", "Unknown"),
+                icon_url=hit.get("icon_url") or "",
+                updated=hit.get("date_modified") or "",
+                categories=tuple(hit.get("categories") or ()),
+                source_url=f"https://modrinth.com/mod/{hit.get('slug') or hit['project_id']}",
             )
             for hit in data.get("hits", [])
         ]
@@ -99,8 +103,23 @@ class ModrinthClient:
             slug=data.get("slug", ""),
             summary=data.get("description", ""),
             downloads=int(data.get("downloads", 0)),
-            author="Modrinth",
+            author=data.get("team", "Modrinth"),
+            icon_url=data.get("icon_url") or "",
+            body=data.get("body") or data.get("description", ""),
+            updated=data.get("updated") or "",
+            categories=tuple(data.get("categories") or ()),
+            source_url=f"https://modrinth.com/mod/{data.get('slug') or data['id']}",
         )
+
+    def image(self, url: str) -> bytes:
+        request = urllib.request.Request(url, headers={"User-Agent": "Blocksmith/0.2 (Minecraft launcher)"})
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                if response.headers.get_content_type() not in ("image/png", "image/gif"):
+                    raise CurseForgeError("Modrinth returned an unsupported icon format.")
+                return response.read(2 * 1024 * 1024)
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise CurseForgeError(f"Could not load the mod icon: {exc}") from exc
 
     @staticmethod
     def download_url(project_id, file: dict) -> str:
