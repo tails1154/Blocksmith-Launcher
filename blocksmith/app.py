@@ -101,7 +101,7 @@ class BlocksmithApp(tk.Tk):
             selected = next((profile for profile in self.profiles if profile.id == last_id), self.profiles[0])
             self.select_profile(selected)
         if self.settings.get("check_updates", True):
-            self.after(1500, lambda: self.check_for_updates(silent=True))
+            self.after(1500, lambda: self.check_for_updates(silent=False))
         if protocol_uri:
             self.after(700, lambda: self.handle_protocol_uri(protocol_uri))
 
@@ -974,7 +974,13 @@ class BlocksmithApp(tk.Tk):
                         self.update_status.config(text=f"{update.name} is available.")
                         self.update_button.config(state="normal")
                         if not silent:
-                            messagebox.showinfo("Blocksmith update", f"{update.name} is ready to download.")
+                            if messagebox.askyesno(
+                                "Blocksmith update available",
+                                f"{update.name} is available.\n\n"
+                                "Download the verified update now?",
+                                icon="question",
+                            ):
+                                self.download_update()
                 elif kind == "update_progress":
                     self.update_progress["value"] = float(value) * 100
                 elif kind == "update_ready":
