@@ -59,8 +59,6 @@ class GitHubUpdater:
             raise UpdateError(f"Automatic updates are not published for {machine} yet.")
         if sys.platform == "win32":
             return "Blocksmith-windows-x86_64.zip"
-        if sys.platform.startswith("linux"):
-            return "Blocksmith-linux-x86_64.tar.gz"
         raise UpdateError(f"Automatic updates are not supported on {sys.platform}.")
 
     @staticmethod
