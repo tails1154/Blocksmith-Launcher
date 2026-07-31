@@ -9,11 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from . import __version__
 from .models import Profile
 from .storage import LauncherStorage
 
 
 API_BASE = "https://api.curseforge.com/v1"
+USER_AGENT = f"Blocksmith/{__version__}"
 MINECRAFT_GAME_ID = 432
 MOD_CLASS_ID = 6
 LOADER_IDS = {"Forge": 1, "Fabric": 4, "Quilt": 5, "NeoForge": 6}
@@ -119,7 +121,7 @@ class CurseForgeClient:
         return url
 
     def download(self, url: str, destination: Path, progress: Callable[[float], None]) -> None:
-        request = urllib.request.Request(url, headers={"x-api-key": self.api_key, "User-Agent": "Blocksmith/0.1"})
+        request = urllib.request.Request(url, headers={"x-api-key": self.api_key, "User-Agent": USER_AGENT})
         temporary = destination.with_suffix(destination.suffix + ".part")
         try:
             with urllib.request.urlopen(request, timeout=60) as response, temporary.open("wb") as output:

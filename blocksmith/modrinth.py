@@ -5,11 +5,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from . import __version__
 from .curseforge import ModProject, CurseForgeError
 from .models import Profile
 
 
 API_BASE = "https://api.modrinth.com/v2"
+USER_AGENT = f"Blocksmith/{__version__} (Minecraft launcher)"
 LOADER_NAMES = {
     "Fabric": "fabric",
     "Forge": "forge",
@@ -27,7 +29,7 @@ class ModrinthClient:
             url += "?" + urllib.parse.urlencode(params)
         request = urllib.request.Request(
             url,
-            headers={"Accept": "application/json", "User-Agent": "Blocksmith/0.1 (Minecraft launcher)"},
+            headers={"Accept": "application/json", "User-Agent": USER_AGENT},
         )
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
@@ -112,7 +114,7 @@ class ModrinthClient:
         )
 
     def image(self, url: str) -> bytes:
-        request = urllib.request.Request(url, headers={"User-Agent": "Blocksmith/0.2 (Minecraft launcher)"})
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
                 if response.headers.get_content_type() not in ("image/png", "image/gif"):
@@ -126,7 +128,7 @@ class ModrinthClient:
         return file["downloadUrl"]
 
     def download(self, url, destination, progress) -> None:
-        request = urllib.request.Request(url, headers={"User-Agent": "Blocksmith/0.1 (Minecraft launcher)"})
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         temporary = destination.with_suffix(destination.suffix + ".part")
         try:
             with urllib.request.urlopen(request, timeout=60) as response, temporary.open("wb") as output:
